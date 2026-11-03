@@ -1,0 +1,20 @@
+services:
+  proverun:
+    build: .
+    ports:
+      - "8787:8787"
+    environment:
+      PORT: "8787"
+      VULTR_INFERENCE_API_KEY: ${VULTR_INFERENCE_API_KEY:-}
+      VULTR_INFERENCE_BASE_URL: ${VULTR_INFERENCE_BASE_URL:-https://api.vultrinference.com/v1}
+      VULTR_INFERENCE_MODEL: ${VULTR_INFERENCE_MODEL:-deepseek-v4.1-flash-1017}
+      SANDBOX_IMAGE: ${SANDBOX_IMAGE:-python:3.12-slim}
+      SANDBOX_TIMEOUT_SEC: ${SANDBOX_TIMEOUT_SEC:-20}
+      SANDBOX_MEMORY: ${SANDBOX_MEMORY:-256m}
+      SANDBOX_CPUS: ${SANDBOX_CPUS:-0.5}
+      SANDBOX_PIDS_LIMIT: ${SANDBOX_PIDS_LIMIT:-64}
+    # The API process calls `docker run` on the host daemon. Read the socket
+    # warning in README before using this file. The sandbox containers
+    # themselves are started with --network none and do not receive this socket.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

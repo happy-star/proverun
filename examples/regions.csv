@@ -1,0 +1,9 @@
+region,location,cpu_price,latency_ms,zones
+ewr,New Jersey,0.042,12,3
+lax,Los Angeles,0.048,18,2
+ams,Amsterdam,0.046,40,2
+sgp,Singapore,0.052,8,2
+syd,Sydney,0.055,22,1
+lhr,London,0.047,36,2
+nrt,Tokyo,0.058,14,2
+fra,Frankfurt,0.045,38,3

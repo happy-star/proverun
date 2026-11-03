@@ -1,0 +1,22 @@
+{
+  "name": "proverun",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ProveRun — Blast Radius Zero. Natural language and CSV in, sandboxed Python out.",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev -w server\" \"npm run dev -w web\"",
+    "start": "npm run start -w server",
+    "build": "npm run build -w web",
+    "test": "npm test -w server"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
