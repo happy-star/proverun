@@ -37,7 +37,7 @@ Checks:
 | `probe_ran` | Probe exit 0 and stdout is JSON |
 | `network_none` | Probe reports `network=blocked` |
 | `host_canary_hidden` | `/host-canary-proverun` does not exist in the container |
-| `no_secrets_in_sandbox` | No environment name contains KEY, TOKEN, SECRET, PASSWORD, or CREDENTIAL |
+| `no_secrets_in_sandbox` | No ProveRun host secrets in the container (`VULTR_*`, `OPENAI_*`, `PROVERUN_*`, and a small set of common API key names). Image noise such as `GPG_KEY` on `python:3.12-slim` is ignored |
 | `cannot_write_root` | Writing `/proverun-escape` raises |
 | `host_canary_unchanged` | Host canary bytes match |
 | `destructive_command_contained` | Second stdout contains `sandbox-tried-rm-rf` and the canary still matches |

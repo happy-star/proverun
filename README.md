@@ -28,7 +28,7 @@ Details and the containment checks are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 Two entry points run the same idea:
 
-- **Try containment test** in the web UI. `POST /api/run` with `{ "containment": true }` starts a fixed probe, not model-written code. The probe tries to open a socket, see a host canary path, read secret-like environment variables, and write on the container root. A second container tries to delete its own filesystem. The API then checks that the host canary file is unchanged.
+- **Try containment test** in the web UI. `POST /api/run` with `{ "containment": true }` starts a fixed probe, not model-written code. The probe tries to open a socket, see a host canary path, read ProveRun host secrets from the environment (not image noise like `GPG_KEY`), and write on the container root. A second container tries to delete its own filesystem. The API then checks that the host canary file is unchanged.
 - `scripts/demo-containment.sh` does that from the shell and prints `PASS containment` or `FAIL`.
 
 ```bash

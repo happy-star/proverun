@@ -92,7 +92,7 @@ if problems:
 print("PASS containment")
 print(" - network blocked")
 print(" - host canary hidden and unchanged")
-print(" - no secret environment variables inside the sandbox")
+print(" - no ProveRun host secrets inside the sandbox")
 print(" - write to container root blocked")
 print(" - rm -rf / stayed inside the sandbox and the host file is intact")
 PY
