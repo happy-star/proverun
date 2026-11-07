@@ -46,6 +46,18 @@ Checks:
 
 Generated analysis code is rejected if it mentions `VULTR_INFERENCE_API_KEY` or exceeds 50 KB. That check is extra. The sandbox still would not have the key.
 
+## SERV audit
+
+This path is off unless `POST /api/run` includes boolean `audit: true`. The checkbox in the UI defaults to off, and the request body then matches the historical shape. `GET /api/health` does not gain a SERV field and still does not start a container or call a model.
+
+When the flag is set, ProveRun builds an allowlisted evidence bundle after the sandbox returns: exit code, timeout, bounded stdout and stderr, containment check names and pass bits, and the Docker arguments it requested (`requested.*`). Question text, CSV contents, generated source, host paths, and the canary secret are omitted. Secret-shaped strings in stdout and stderr are redacted before anything leaves the process.
+
+If `SERV_API_KEY` is empty, the job stores `audit.status: "unconfigured"` and does not open a socket. If the key is set, one chat completion goes to `https://inference-api.openserv.ai/v1/chat/completions` with bearer auth, a mandatory system prompt, `response_format.json_schema`, `reasoning_effort: "low"`, `max_completion_tokens` default 500, and the `serv_prompt_guard` tool. `serv_shadow_agent` is not sent. The model has no tool that can start or reconfigure Docker.
+
+Application code parses the message and rejects it unless `finish_reason` is `stop` and the JSON matches the schema. Evidence refs must be ids from that bundle. Anything else — malformed JSON, extra fields, unknown refs, `finish_reason: "length"`, non-200 responses, or a timeout — is `inconclusive`, with `claims` empty. Accepted claims are marked `authority: "model-inference"`. They are not execution proof.
+
+`liveCall` is true only when this process used its own `fetch` against the configured SERV URL and the response passed validation. Fixture tests inject `fetch` and set `invocation: "local-fixture"`, so they stay `liveCall: false`.
+
 ## Process split
 
 - `web/` is a Vite dev server in development and static files under `web/dist` in production. The API serves those files when the build exists.
@@ -58,4 +70,4 @@ Jobs are a `Map` in the API process. Restarting the process drops them. There is
 
 ## Tests
 
-`npm test` runs the server `node --test` suite. It covers fence extraction, mock CSV execution via local Python, the Vultr request shape with a fake `fetch`, Docker argument and environment scrubbing, containment evaluation, and the HTTP routes with a fake sandbox. Those tests do not call Vultr and do not require a Docker daemon.
+`npm test` runs the server `node --test` suite. It covers fence extraction, mock CSV execution via local Python, the Vultr request shape with a fake `fetch`, Docker argument and environment scrubbing, containment evaluation, and the HTTP routes with a fake sandbox. SERV cases replay files in `server/test/fixtures/serv/` through an injected `fetch`. Those tests do not call Vultr or SERV and do not require a Docker daemon.

@@ -234,6 +234,8 @@ test("API runs a mock analysis and a containment job without Vultr", async () =>
     assert.match(finished.code, /csv/);
     assert.match(finished.explanation, /Mock inference/);
     assert.equal(Object.hasOwn(finished, "csv"), false);
+    assert.equal(Object.hasOwn(finished, "audit"), false);
+    assert.equal(Object.hasOwn(job, "audit"), false);
 
     const containment = await fetch(`http://127.0.0.1:${port}/api/run`, {
       method: "POST",
@@ -242,6 +244,7 @@ test("API runs a mock analysis and a containment job without Vultr", async () =>
     });
     const containmentJob = await pollJob(port, (await containment.json()).job.id);
     assert.equal(containmentJob.status, "done");
+    assert.equal(Object.hasOwn(containmentJob, "audit"), false);
     assert.equal(containmentJob.checks.every((check) => check.pass), true);
     assert.ok(calls.some((command) => command[0] === "python" && command[1] === "/work/main.py"));
     assert.ok(calls.some((command) => command.includes("/work/probe.py")));

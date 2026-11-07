@@ -1,0 +1,21 @@
+{
+  "fixture": "local-fake-not-live",
+  "case": "missing-evidence",
+  "httpStatus": 200,
+  "body": {
+    "id": "fixture-missing-not-live",
+    "object": "chat.completion",
+    "model": "gpt-5.4-mini",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "{\"claims\":[{\"id\":\"c1\",\"statement\":\"Host isolation was not directly measured in this bundle.\",\"evidenceRefs\":[]}],\"missingEvidence\":[\"No host-canary comparison record was supplied.\"],\"limitations\":[\"Uncited statements are not records.\"]}"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": { "prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30 }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "fixture": "local-fake-not-live",
+  "case": "ref-mismatch",
+  "httpStatus": 200,
+  "body": {
+    "id": "fixture-ref-mismatch-not-live",
+    "object": "chat.completion",
+    "model": "gpt-5.4-mini",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "{\"claims\":[{\"id\":\"c1\",\"statement\":\"The kernel enforced network none.\",\"evidenceRefs\":[\"kernel.enforced.network\"]}],\"missingEvidence\":[],\"limitations\":[]}"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": { "prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30 }
+  }
+}

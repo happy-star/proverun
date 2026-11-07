@@ -1,0 +1,21 @@
+{
+  "fixture": "local-fake-not-live",
+  "case": "schema-invalid",
+  "httpStatus": 200,
+  "body": {
+    "id": "fixture-schema-not-live",
+    "object": "chat.completion",
+    "model": "gpt-5.4-mini",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "{\"claims\":[],\"missingEvidence\":[],\"limitations\":[],\"network\":\"bridge\"}"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": { "prompt_tokens": 10, "completion_tokens": 12, "total_tokens": 22 }
+  }
+}

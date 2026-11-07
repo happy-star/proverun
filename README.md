@@ -35,6 +35,14 @@ job record  GET /api/jobs/:id
 
 Details and the containment checks are in [ARCHITECTURE.md](ARCHITECTURE.md). On the public VM, Cloud Compute is the web, API, and Docker host; Serverless Inference is only the model call, as described above.
 
+## SERV audit
+
+SERV is an optional audit of sanitized sandbox evidence. It is off unless a run sends `{ "audit": true }` and `SERV_API_KEY` is set. The default buttons do not send that flag. The public Vultr demo is unchanged.
+
+The audit runs only after the sandbox returns. It cannot start a container or change network, mounts, or limits. Runtime records (exit code, timeout, stdout, stderr, containment checks, and the arguments ProveRun passed to Docker) stay separate from model claims. Claims are inferences, not execution proof. A missing key, malformed JSON, a schema violation, an unknown evidence id, `finish_reason: "length"`, or a provider error ends as `unconfigured` or `inconclusive` with no accepted claims.
+
+Setup, the request contract, and the fixture-only test record are in [docs/SERV-AUDIT.md](docs/SERV-AUDIT.md).
+
 ## Containment
 
 Two entry points run the same idea:
@@ -92,6 +100,11 @@ npm test
 | `SANDBOX_CPUS` | Default `0.5`. |
 | `SANDBOX_PIDS_LIMIT` | Default `64`. |
 | `MAX_CSV_BYTES` | Upload cap. Default `200000`. |
+| `SERV_API_KEY` | Optional. Empty disables the audit. No request is sent unless a run opts in. |
+| `SERV_BASE_URL` | Default `https://inference-api.openserv.ai/v1`. |
+| `SERV_MODEL` | Default `gpt-5.4-mini`, the chat-completions example id on the SERV docs. |
+| `SERV_TIMEOUT_MS` | Audit HTTP timeout. Default `12000`. |
+| `SERV_MAX_COMPLETION_TOKENS` | Output cap for one audit call. Default `500`. |
 
 See `.env.example`.
 

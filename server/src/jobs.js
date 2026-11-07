@@ -4,6 +4,8 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { reviewCode } from "./extract.js";
 import { DESTROY_COMMAND, evaluateContainment, loadProbeSource } from "./containment.js";
+import { buildRuntimeEvidence } from "./auditEvidence.js";
+import { missingRuntimeAudit, providerFailureAudit, unconfiguredAudit } from "./servAudit.js";
 
 const MAX_QUESTION = 4_000;
 
@@ -62,7 +64,7 @@ export function validateRunInput(body, config) {
   if (csv.includes("\0")) {
     return { error: "CSV must be text." };
   }
-  return { containment, question, csv };
+  return { containment, question, csv, audit: body?.audit === true };
 }
 
 export async function executeJob(job, deps) {
@@ -74,28 +76,34 @@ export async function executeJob(job, deps) {
   try {
     fs.chmodSync(workDir, 0o755);
     if (job.mode === "containment") {
-      await runContainment({ job, jobs, sandbox, config, workDir, canaryPath, canary });
+      await runContainment({ job, jobs, sandbox, config, workDir, canaryPath, canary, serv: deps.serv });
       return;
     }
-    await runAnalysis({ job, jobs, inference, sandbox, config, workDir });
+    await runAnalysis({ job, jobs, inference, sandbox, config, workDir, serv: deps.serv });
   } catch (error) {
-    jobs.update(job.id, {
+    const patch = {
       status: "error",
       error: error instanceof Error ? error.message : String(error),
-    });
+    };
+    const audit = await maybeAudit(job, deps.serv, null);
+    if (audit) patch.audit = audit;
+    jobs.update(job.id, patch);
   } finally {
     fs.rmSync(workDir, { recursive: true, force: true });
     fs.rmSync(canaryPath, { force: true });
   }
 }
 
-async function runAnalysis({ job, jobs, inference, sandbox, config, workDir }) {
+async function runAnalysis({ job, jobs, inference, sandbox, config, workDir, serv }) {
   const csvPath = path.join(workDir, "data.csv");
   if (job.csv) fs.writeFileSync(csvPath, job.csv, { mode: 0o644 });
   const written = await inference.writePython({ question: job.question, csv: job.csv });
   const rejection = reviewCode(written.code);
   if (rejection) {
-    jobs.update(job.id, { status: "error", error: rejection, code: written.code || written.raw || "" });
+    const patch = { status: "error", error: rejection, code: written.code || written.raw || "" };
+    const audit = await maybeAudit(job, serv, null);
+    if (audit) patch.audit = audit;
+    jobs.update(job.id, patch);
     return;
   }
   const scriptPath = path.join(workDir, "main.py");
@@ -123,17 +131,27 @@ async function runAnalysis({ job, jobs, inference, sandbox, config, workDir }) {
     explanation = `The script ran, but the explanation call failed: ${error.message}`;
   }
   const failed = result.exitCode !== 0;
-  jobs.update(job.id, {
+  const patch = {
     status: failed ? "error" : "done",
     code: written.code,
     stdout: result.stdout,
     stderr: result.stderr,
     explanation,
     error: failed ? `Sandbox exited ${result.exitCode}.` : null,
+  };
+  const audit = await maybeAudit(job, serv, {
+    mode: "analysis",
+    csvBytes: Buffer.byteLength(job.csv || "", "utf8"),
+    questionChars: (job.question || "").length,
+    requested: requestedSandbox(config),
+    runs: [namedRun("sandbox", result)],
+    checks: null,
   });
+  if (audit) patch.audit = audit;
+  jobs.update(job.id, patch);
 }
 
-async function runContainment({ job, jobs, sandbox, config, workDir, canaryPath, canary }) {
+async function runContainment({ job, jobs, sandbox, config, workDir, canaryPath, canary, serv }) {
   fs.writeFileSync(canaryPath, canary, { mode: 0o600 });
   fs.writeFileSync(path.join(workDir, "probe.py"), loadProbeSource(), { mode: 0o644 });
   const probe = await sandbox.run({
@@ -165,7 +183,7 @@ async function runContainment({ job, jobs, sandbox, config, workDir, canaryPath,
     canaryAfter,
   });
   const stderr = [probe.stderr, destroy.stderr].filter(Boolean).join("\n");
-  jobs.update(job.id, {
+  const patch = {
     status: report.ok ? "done" : "error",
     code: loadProbeSource(),
     stdout: [probe.stdout, destroy.stdout].filter(Boolean).join("\n"),
@@ -175,9 +193,49 @@ async function runContainment({ job, jobs, sandbox, config, workDir, canaryPath,
       ? "Containment held. The sandbox could not reach the network, see the host canary, read secrets, or change the host after trying to delete its own filesystem."
       : "Containment check failed. Read the checks and stderr. Docker must be running and the sandbox image must be available.",
     error: report.ok ? null : "One or more containment checks failed.",
+  };
+  const audit = await maybeAudit(job, serv, {
+    mode: "containment",
+    csvBytes: 0,
+    questionChars: (job.question || "").length,
+    requested: requestedSandbox(config),
+    runs: [namedRun("probe", probe), namedRun("destroy", destroy)],
+    checks: report.checks,
   });
+  if (audit) patch.audit = audit;
+  jobs.update(job.id, patch);
 }
 
 function containerName(id, suffix) {
   return `proverun-${suffix}-${id.replace(/[^a-z0-9]/gi, "").slice(0, 12)}`;
+}
+
+function namedRun(name, result) {
+  return {
+    name,
+    exitCode: result?.exitCode,
+    timedOut: Boolean(result?.timedOut),
+    stdout: result?.stdout || "",
+    stderr: result?.stderr || "",
+  };
+}
+
+function requestedSandbox(config) {
+  return {
+    network: "none",
+    memory: config?.memory || "",
+    timeoutSec: config?.timeoutSec,
+  };
+}
+
+async function maybeAudit(job, serv, runtime) {
+  if (job.auditRequested !== true) return null;
+  if (!runtime) return missingRuntimeAudit();
+  const evidence = buildRuntimeEvidence(runtime);
+  if (!serv?.configured) return unconfiguredAudit(evidence);
+  try {
+    return await serv.review(evidence);
+  } catch {
+    return providerFailureAudit(evidence);
+  }
 }
