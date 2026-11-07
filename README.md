@@ -6,6 +6,17 @@ The sandbox is the boundary. It has no network, a memory cap, a time cap, a drop
 
 When `VULTR_INFERENCE_API_KEY` is unset, ProveRun uses a deterministic mock that still emits a real stdlib script. The sample regions file can be analyzed without a Vultr account.
 
+## Vultr deployment
+
+The public demo is a Vultr Cloud Compute VM at `140.82.0.23`. That VM hosts the built web UI and the Express API on port 8787, and Docker on the same VM runs the execution sandbox. Vultr Serverless Inference is separate: it writes the Python (and the short explanation of stdout). The model is not running on the VM.
+
+- Demo: http://140.82.0.23:8787
+- Hackathon page: https://lablab.ai/ai-hackathons/vultr-hackathon/peterzhou/proverun
+
+`GET /api/health` reports configuration only. It does not call Serverless Inference and it does not start a container. `inference` is `vultr` when the API process has `VULTR_INFERENCE_API_KEY` set, and `mock` when it does not. `sandbox.runtime`, `sandbox.network`, `sandbox.memory`, and `sandbox.timeoutSec` are the limits that process would pass to `docker run`.
+
+On 7 November 2026 at 11:28 UTC, `GET http://140.82.0.23:8787/api/health` returned HTTP 200 with `inference` `vultr`, sandbox runtime `docker`, network `none`, memory `256m`, and timeout `20` seconds. GETs of the public page assets were checked at the same time. That audit did not submit a question and did not run the containment probe.
+
 ## Architecture
 
 ```
@@ -22,7 +33,7 @@ Express API (server/)
 job record  GET /api/jobs/:id
 ```
 
-Details and the containment checks are in [ARCHITECTURE.md](ARCHITECTURE.md).
+Details and the containment checks are in [ARCHITECTURE.md](ARCHITECTURE.md). On the public VM, Cloud Compute is the web, API, and Docker host; Serverless Inference is only the model call, as described above.
 
 ## Containment
 
