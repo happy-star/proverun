@@ -10,6 +10,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [job, setJob] = useState(null);
+  const [servAudit, setServAudit] = useState(false);
 
   useEffect(() => {
     fetch("/api/health")
@@ -54,11 +55,12 @@ export default function App() {
     setBusy(true);
     setError("");
     setJob(null);
+    const requestBody = servAudit ? { ...body, audit: true } : body;
     try {
       const response = await fetch("/api/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(requestBody),
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -118,6 +120,15 @@ export default function App() {
             <p className="hint">No file yet. The sample lists cloud regions, price, and latency.</p>
           )}
 
+          <label className="checkline">
+            <input
+              type="checkbox"
+              checked={servAudit}
+              onChange={(event) => setServAudit(event.target.checked)}
+              disabled={busy}
+            />
+            <span>Opt-in SERV audit of sandbox evidence. Off by default. Unchecked runs do not call SERV.</span>
+          </label>
           <div className="actions">
             <button type="submit" disabled={busy || !question.trim()}>
               {busy ? "Running…" : "Run in sandbox"}
@@ -178,12 +189,50 @@ function JobView({ job }) {
           <pre>{job.code}</pre>
         </div>
       ) : null}
+      {job.audit ? <AuditView audit={job.audit} /> : null}
+    </div>
+  );
+}
+
+function AuditView({ audit }) {
+  return (
+    <div className="audit">
+      <h3>SERV audit</h3>
+      <p className="note">
+        Status {audit.status}{audit.reason ? ` (${audit.reason})` : ""}. Model statements are inferences, not execution proof.
+        {audit.liveCall ? " This process called the configured SERV endpoint." : " This result is not a live SERV call."}
+      </p>
+      <ul className="checks">
+        {audit.limitations?.map((item) => (
+          <li key={item}><strong>Limit</strong><span>{item}</span></li>
+        ))}
+      </ul>
+      <h3>Runtime evidence</h3>
+      {audit.runtimeEvidence?.map((item) => (
+        <pre key={item.id}>{`${item.id}\n${item.text}`}</pre>
+      ))}
+      <h3>Model inferences</h3>
+      {audit.claims?.length ? audit.claims.map((claim) => (
+        <p key={claim.id} className="prose">
+          {claim.statement} ({claim.citation}; refs {claim.evidenceRefs.join(", ") || "none"})
+        </p>
+      )) : <p className="note">No model claim was accepted.</p>}
+      {audit.missingEvidence?.length ? (
+        <>
+          <h3>Missing evidence</h3>
+          <ul className="checks">
+            {audit.missingEvidence.map((item) => (
+              <li key={item}><strong>Gap</strong><span>{item}</span></li>
+            ))}
+          </ul>
+        </>
+      ) : null}
     </div>
   );
 }
 
 async function poll(id) {
-  for (let attempt = 0; attempt < 80; attempt += 1) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
     const response = await fetch(`/api/jobs/${id}`);
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Job disappeared.");

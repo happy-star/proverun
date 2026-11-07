@@ -1,0 +1,21 @@
+{
+  "fixture": "local-fake-not-live",
+  "case": "success",
+  "httpStatus": 200,
+  "body": {
+    "id": "fixture-success-not-live",
+    "object": "chat.completion",
+    "model": "gpt-5.4-mini",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "{\"claims\":[{\"id\":\"c1\",\"statement\":\"The recorded sandbox exit code is 0.\",\"evidenceRefs\":[\"sandbox.exitCode\"]},{\"id\":\"c2\",\"statement\":\"Stdout includes a latency line.\",\"evidenceRefs\":[\"sandbox.stdout\"]}],\"missingEvidence\":[],\"limitations\":[\"This only restates supplied ids.\"]}"
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": { "prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30 }
+  }
+}

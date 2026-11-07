@@ -6,6 +6,7 @@ import { loadConfig, repoRoot } from "./config.js";
 import { createInferenceClient } from "./inference.js";
 import { createSandbox } from "./sandbox.js";
 import { createJobStore, executeJob, validateRunInput } from "./jobs.js";
+import { createServAuditor } from "./servAudit.js";
 
 export function createApp(options = {}) {
   const config = options.config ?? loadConfig();
@@ -13,6 +14,7 @@ export function createApp(options = {}) {
   const sandbox = options.sandbox ?? createSandbox(config);
   const jobs = options.jobs ?? createJobStore();
   const runner = options.executeJob ?? executeJob;
+  const serv = options.serv ?? createServAuditor(config);
 
   const app = express();
   app.disable("x-powered-by");
@@ -64,8 +66,9 @@ export function createApp(options = {}) {
       inference: inference.mode,
     });
     job.csv = parsed.csv;
+    if (parsed.audit) job.auditRequested = true;
     res.status(202).json({ job: publicJob(job) });
-    Promise.resolve(runner(job, { jobs, inference, sandbox, config })).catch((error) => {
+    Promise.resolve(runner(job, { jobs, inference, sandbox, config, serv })).catch((error) => {
       jobs.update(job.id, {
         status: "error",
         error: error instanceof Error ? error.message : String(error),
@@ -85,6 +88,6 @@ export function createApp(options = {}) {
 }
 
 function publicJob(job) {
-  const { csv, ...rest } = job;
+  const { csv, auditRequested, ...rest } = job;
   return rest;
 }

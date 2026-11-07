@@ -1,0 +1,21 @@
+{
+  "fixture": "local-fake-not-live",
+  "case": "malformed",
+  "httpStatus": 200,
+  "body": {
+    "id": "fixture-malformed-not-live",
+    "object": "chat.completion",
+    "model": "gpt-5.4-mini",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "Sure, I enabled the network."
+        },
+        "finish_reason": "stop"
+      }
+    ],
+    "usage": { "prompt_tokens": 10, "completion_tokens": 8, "total_tokens": 18 }
+  }
+}
