@@ -14,6 +14,7 @@ import {
   buildChatRequest,
   createServAuditor,
   interpretBody,
+  interpretResponse,
 } from "../src/servAudit.js";
 import { runSmoke } from "../src/servSmoke.js";
 
@@ -62,8 +63,13 @@ test("chat request requires a system prompt, cites only evidence, and does not e
   assert.equal(request.reasoning_effort, "low");
   assert.equal(request.max_completion_tokens, 500);
   assert.equal(request.stream, false);
-  assert.equal(request.tool_choice, "none");
+  assert.equal(Object.hasOwn(request, "tool_choice"), false);
   assert.deepEqual(request.tools.map((tool) => tool.function.name), ["serv_prompt_guard"]);
+  const sentSchema = JSON.stringify(request.response_format.json_schema.schema);
+  assert.equal(sentSchema.includes("minLength"), false);
+  assert.equal(sentSchema.includes("maxLength"), false);
+  assert.equal(sentSchema.includes("maxItems"), false);
+  assert.equal(request.response_format.json_schema.schema.additionalProperties, false);
   assert.equal(JSON.stringify(request).includes("serv_shadow_agent"), false);
   assert.equal(request.response_format.json_schema.name, "proverun_audit");
 });
@@ -441,7 +447,54 @@ test("smoke command without a key exits 2 and does not claim success", async () 
   assert.equal(report.calls, 0);
   assert.equal(report.exitCode, 2);
   assert.equal(report.audit.status, "unconfigured");
+  assert.equal(report.audit.requestAttempted, false);
+  assert.equal(report.audit.requestSent, false);
+  assert.equal(report.audit.liveCall, false);
   assert.match(stderr, /did not pass/);
+});
+
+test("HTTP 400 keeps allowlisted error fields and drops a poisoned message", async () => {
+  const { audit, seen } = await reviewFixture("http-400.json");
+  assert.equal(audit.status, "inconclusive");
+  assert.equal(audit.reason, "provider_error");
+  assert.equal(audit.providerStatus, 400);
+  assert.equal(audit.requestAttempted, true);
+  assert.equal(audit.requestSent, true);
+  assert.equal(audit.liveCall, false);
+  assert.equal(audit.finishReason, null);
+  assert.deepEqual(audit.claims, []);
+  assert.equal(audit.providerType, "invalid_request_error");
+  assert.equal(audit.providerCode, "invalid_value");
+  assert.equal(audit.providerParam, "tool_choice");
+  assert.equal(audit.providerMessage, null);
+  const blob = JSON.stringify(audit);
+  assert.equal(blob.includes("super-secret-value"), false);
+  assert.equal(blob.includes("synthetic-stdout-token-7"), false);
+  assert.equal(seen[0].init.body.includes(FAKE_KEY), false);
+
+  const clean = await interpretResponse({
+    response: {
+      ok: false,
+      status: 400,
+      json: async () => ({
+        error: {
+          type: "invalid_request_error",
+          code: "unknown_parameter",
+          param: "response_format",
+          message: "Unknown parameter: response_format.",
+        },
+      }),
+    },
+    evidence: sampleEvidence(),
+    invocation: "local-fixture",
+    model: "gpt-5.4-mini",
+    liveCapable: true,
+  });
+  assert.equal(clean.providerStatus, 400);
+  assert.equal(clean.requestSent, true);
+  assert.equal(clean.liveCall, false);
+  assert.equal(clean.providerMessage, "Unknown parameter: response_format.");
+  assert.equal(clean.providerParam, "response_format");
 });
 
 function completion(content) {

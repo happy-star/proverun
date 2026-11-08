@@ -20,6 +20,8 @@ const printed = JSON.parse(redactSecrets(JSON.stringify({
     status: report.audit.status,
     reason: report.audit.reason,
     liveCall: report.audit.liveCall,
+    requestAttempted: report.audit.requestAttempted,
+    requestSent: report.audit.requestSent,
     invocation: report.audit.invocation,
     model: report.audit.model,
     finishReason: report.audit.finishReason,
@@ -28,6 +30,10 @@ const printed = JSON.parse(redactSecrets(JSON.stringify({
     missingEvidence: report.audit.missingEvidence,
     runtimeEvidence: report.audit.runtimeEvidence,
     providerStatus: report.audit.providerStatus,
+    providerType: report.audit.providerType,
+    providerCode: report.audit.providerCode,
+    providerParam: report.audit.providerParam,
+    providerMessage: report.audit.providerMessage,
   },
 })));
 if (secret && JSON.stringify(printed).includes(secret)) {

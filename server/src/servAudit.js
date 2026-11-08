@@ -1,4 +1,4 @@
-import { boundText } from "./auditEvidence.js";
+import { boundText, redactSecrets } from "./auditEvidence.js";
 
 export const SERV_MODEL = "gpt-5.4-mini";
 export const SERV_BASE_URL = "https://inference-api.openserv.ai/v1";
@@ -19,31 +19,27 @@ export const AUDIT_RESPONSE_SCHEMA = {
   properties: {
     claims: {
       type: "array",
-      maxItems: 8,
       items: {
         type: "object",
         additionalProperties: false,
         required: ["id", "statement", "evidenceRefs"],
         properties: {
-          id: { type: "string", minLength: 1, maxLength: 40 },
-          statement: { type: "string", minLength: 1, maxLength: 500 },
+          id: { type: "string" },
+          statement: { type: "string" },
           evidenceRefs: {
             type: "array",
-            maxItems: 6,
-            items: { type: "string", minLength: 1, maxLength: 80 },
+            items: { type: "string" },
           },
         },
       },
     },
     missingEvidence: {
       type: "array",
-      maxItems: 8,
-      items: { type: "string", minLength: 1, maxLength: 300 },
+      items: { type: "string" },
     },
     limitations: {
       type: "array",
-      maxItems: 8,
-      items: { type: "string", minLength: 1, maxLength: 300 },
+      items: { type: "string" },
     },
   },
 };
@@ -96,7 +92,13 @@ export function createServAuditor(config, options = {}) {
           liveCapable: options.allowLiveResult === true || (!injected && invocation === "serv-http"),
         });
       } catch {
-        return fail("provider_error", evidence, { invocation, model, liveCall: false });
+        return fail("provider_error", evidence, {
+          invocation,
+          model,
+          liveCall: false,
+          requestAttempted: true,
+          requestSent: false,
+        });
       }
     },
   };
@@ -120,7 +122,6 @@ export function buildChatRequest({ model, maxCompletionTokens, evidence }) {
         schema: AUDIT_RESPONSE_SCHEMA,
       },
     },
-    tool_choice: "none",
     tools: [
       { type: "function", function: { name: "serv_prompt_guard" } },
     ],
@@ -141,15 +142,28 @@ export function buildEvidenceMessage(evidence) {
   return lines.join("\n");
 }
 
-export function interpretResponse({ response, evidence, invocation, model, liveCapable }) {
-  const base = { invocation, model, liveCall: false };
+export async function interpretResponse({ response, evidence, invocation, model, liveCapable }) {
+  const transport = {
+    invocation,
+    model,
+    liveCall: false,
+    requestAttempted: true,
+    requestSent: Boolean(response && typeof response.status === "number"),
+  };
   if (!response || response.ok !== true) {
-    return fail("provider_error", evidence, { ...base, providerStatus: response?.status ?? null });
+    const summary = await readErrorSummary(response);
+    return fail("provider_error", evidence, {
+      ...transport,
+      providerStatus: response?.status ?? null,
+      ...summary,
+    });
   }
-  return response.json().then(
-    (body) => interpretBody(body, evidence, { ...base, liveCapable }),
-    () => fail("provider_error", evidence, base),
-  );
+  try {
+    const body = await response.json();
+    return interpretBody(body, evidence, { ...transport, liveCapable });
+  } catch {
+    return fail("provider_error", evidence, transport);
+  }
 }
 
 export function interpretBody(body, evidence, meta) {
@@ -193,6 +207,8 @@ export function interpretBody(body, evidence, meta) {
     reason: null,
     authority: "model-inference",
     invocation: meta.invocation,
+    requestAttempted: meta.requestAttempted === true,
+    requestSent: meta.requestSent === true,
     liveCall: Boolean(meta.liveCapable),
     model: meta.model,
     finishReason,
@@ -204,6 +220,10 @@ export function interpretBody(body, evidence, meta) {
     omitted: evidence?.omitted || [],
     unknownRefs: [],
     providerStatus: null,
+    providerType: null,
+    providerCode: null,
+    providerParam: null,
+    providerMessage: null,
   };
 }
 
@@ -312,6 +332,8 @@ export function unconfiguredAudit(evidence) {
     reason: "unconfigured",
     authority: "none",
     invocation: "none",
+    requestAttempted: false,
+    requestSent: false,
     liveCall: false,
     model: null,
     finishReason: null,
@@ -326,6 +348,10 @@ export function unconfiguredAudit(evidence) {
     omitted: evidence?.omitted || [],
     unknownRefs: [],
     providerStatus: null,
+    providerType: null,
+    providerCode: null,
+    providerParam: null,
+    providerMessage: null,
   };
 }
 
@@ -347,6 +373,8 @@ function fail(reason, evidence, extra = {}) {
     reason,
     authority: "none",
     invocation: extra.invocation || "none",
+    requestAttempted: extra.requestAttempted === true,
+    requestSent: extra.requestSent === true,
     liveCall: false,
     model: extra.model ?? null,
     finishReason: extra.finishReason ?? null,
@@ -358,7 +386,51 @@ function fail(reason, evidence, extra = {}) {
     omitted: evidence?.omitted || [],
     unknownRefs: extra.unknownRefs || [],
     providerStatus: extra.providerStatus ?? null,
+    providerType: extra.providerType ?? null,
+    providerCode: extra.providerCode ?? null,
+    providerParam: extra.providerParam ?? null,
+    providerMessage: extra.providerMessage ?? null,
   };
+}
+
+export function summarizeProviderError(body) {
+  const error = body && typeof body === "object" ? body.error : null;
+  if (!error || typeof error !== "object" || Array.isArray(error)) {
+    return { providerType: null, providerCode: null, providerParam: null, providerMessage: null };
+  }
+  return {
+    providerType: allowlistedToken(error.type),
+    providerCode: allowlistedToken(error.code),
+    providerParam: allowlistedToken(error.param),
+    providerMessage: boundedProviderMessage(error.message),
+  };
+}
+
+function allowlistedToken(value) {
+  if (typeof value !== "string") return null;
+  if (!/^[A-Za-z0-9_.-]{1,64}$/.test(value)) return null;
+  return value;
+}
+
+function boundedProviderMessage(value) {
+  if (typeof value !== "string") return null;
+  let text = redactSecrets(value).replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  if (text.length > 180) text = `${text.slice(0, 180)}…`;
+  if (/<evidence\b/i.test(text) || text.includes("SYNTHETIC sample") || text.includes("synthetic-stdout-token")) {
+    return null;
+  }
+  return text;
+}
+
+async function readErrorSummary(response) {
+  const empty = { providerType: null, providerCode: null, providerParam: null, providerMessage: null };
+  if (!response || typeof response.json !== "function") return empty;
+  try {
+    return summarizeProviderError(await response.json());
+  } catch {
+    return empty;
+  }
 }
 
 function publicEvidence(evidence) {
