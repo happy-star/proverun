@@ -72,6 +72,15 @@ test("chat request requires a system prompt, cites only evidence, and does not e
   assert.equal(request.response_format.json_schema.schema.additionalProperties, false);
   assert.equal(JSON.stringify(request).includes("serv_shadow_agent"), false);
   assert.equal(request.response_format.json_schema.name, "proverun_audit");
+  assert.deepEqual(Object.keys(request).sort(), [
+    "max_completion_tokens",
+    "messages",
+    "model",
+    "reasoning_effort",
+    "response_format",
+    "stream",
+    "tools",
+  ]);
 });
 
 test("fixture success keeps model claims as inferences and does not mark a live call", async () => {
@@ -464,7 +473,7 @@ test("HTTP 400 keeps allowlisted error fields and drops a poisoned message", asy
   assert.equal(audit.finishReason, null);
   assert.deepEqual(audit.claims, []);
   assert.equal(audit.providerType, "invalid_request_error");
-  assert.equal(audit.providerCode, "invalid_value");
+  assert.equal(audit.providerCode, null);
   assert.equal(audit.providerParam, "tool_choice");
   assert.equal(audit.providerMessage, null);
   const blob = JSON.stringify(audit);
@@ -493,8 +502,101 @@ test("HTTP 400 keeps allowlisted error fields and drops a poisoned message", asy
   assert.equal(clean.providerStatus, 400);
   assert.equal(clean.requestSent, true);
   assert.equal(clean.liveCall, false);
-  assert.equal(clean.providerMessage, "Unknown parameter: response_format.");
+  assert.equal(clean.providerMessage, null);
+  assert.equal(clean.providerCode, null);
   assert.equal(clean.providerParam, "response_format");
+  assert.equal(JSON.stringify(clean).includes("Unknown parameter"), false);
+
+  const unlabeled = "sk-livefixturekeyvalue";
+  const leaked = await interpretResponse({
+    response: {
+      ok: false,
+      status: 400,
+      json: async () => ({
+        error: {
+          type: unlabeled,
+          code: unlabeled,
+          param: unlabeled,
+          message: `rejected ${unlabeled}`,
+        },
+      }),
+    },
+    evidence: sampleEvidence(),
+    invocation: "local-fixture",
+    model: "gpt-5.4-mini",
+    liveCapable: true,
+  });
+  assert.equal(leaked.providerType, null);
+  assert.equal(leaked.providerCode, null);
+  assert.equal(leaked.providerParam, null);
+  assert.equal(leaked.providerMessage, null);
+  assert.equal(JSON.stringify(leaked).includes(unlabeled), false);
+  assert.equal(leaked.requestSent, true);
+  assert.equal(leaked.liveCall, false);
+
+  const oversized = "A".repeat(20_000);
+  const huge = await interpretResponse({
+    response: {
+      ok: false,
+      status: 400,
+      json: async () => ({ error: { type: "invalid_request_error", param: "model", message: oversized } }),
+    },
+    evidence: sampleEvidence(),
+    invocation: "serv-http",
+    model: "gpt-5.4-mini",
+    liveCapable: true,
+  });
+  assert.equal(huge.providerStatus, 400);
+  assert.equal(huge.requestSent, true);
+  assert.equal(huge.liveCall, false);
+  assert.equal(huge.providerType, null);
+  assert.equal(huge.providerMessage, null);
+  assert.equal(JSON.stringify(huge).includes(oversized.slice(0, 100)), false);
+});
+
+test("an oversized provider error stream is cancelled and not copied", async () => {
+  let cancelled = false;
+  const payload = JSON.stringify({
+    error: {
+      type: "invalid_request_error",
+      param: "model",
+      message: "B".repeat(10_000),
+    },
+  });
+  const bytes = new TextEncoder().encode(payload);
+  const audit = await interpretResponse({
+    response: {
+      ok: false,
+      status: 400,
+      body: {
+        getReader() {
+          let offset = 0;
+          return {
+            async read() {
+              if (offset >= bytes.length) return { done: true, value: undefined };
+              const end = Math.min(offset + 1000, bytes.length);
+              const value = bytes.slice(offset, end);
+              offset = end;
+              return { done: false, value };
+            },
+            async cancel() { cancelled = true; },
+          };
+        },
+      },
+    },
+    evidence: sampleEvidence(),
+    invocation: "local-fixture",
+    model: "gpt-5.4-mini",
+    liveCapable: true,
+  });
+  assert.equal(cancelled, true);
+  assert.equal(audit.providerStatus, 400);
+  assert.equal(audit.requestAttempted, true);
+  assert.equal(audit.requestSent, true);
+  assert.equal(audit.liveCall, false);
+  assert.equal(audit.providerType, null);
+  assert.equal(audit.providerMessage, null);
+  assert.equal(JSON.stringify(audit).includes("BBBBBBBBBB"), false);
 });
 
 function completion(content) {

@@ -1,4 +1,4 @@
-import { boundText, redactSecrets } from "./auditEvidence.js";
+import { boundText } from "./auditEvidence.js";
 
 export const SERV_MODEL = "gpt-5.4-mini";
 export const SERV_BASE_URL = "https://inference-api.openserv.ai/v1";
@@ -158,12 +158,9 @@ export async function interpretResponse({ response, evidence, invocation, model,
       ...summary,
     });
   }
-  try {
-    const body = await response.json();
-    return interpretBody(body, evidence, { ...transport, liveCapable });
-  } catch {
-    return fail("provider_error", evidence, transport);
-  }
+  const parsed = await readJsonLimited(response, MAX_SUCCESS_BYTES);
+  if (!parsed.ok) return fail("provider_error", evidence, transport);
+  return interpretBody(parsed.value, evidence, { ...transport, liveCapable });
 }
 
 export function interpretBody(body, evidence, meta) {
@@ -393,44 +390,81 @@ function fail(reason, evidence, extra = {}) {
   };
 }
 
+const DOCUMENTED_ERROR_TYPES = new Set(["invalid_request_error"]);
+const DOCUMENTED_CHAT_PARAMS = new Set([
+  "model",
+  "messages",
+  "max_completion_tokens",
+  "reasoning_effort",
+  "temperature",
+  "tools",
+  "tool_choice",
+  "stream",
+  "response_format",
+]);
+const MAX_ERROR_BYTES = 4_096;
+const MAX_SUCCESS_BYTES = 65_536;
+
 export function summarizeProviderError(body) {
+  const empty = { providerType: null, providerCode: null, providerParam: null, providerMessage: null };
   const error = body && typeof body === "object" ? body.error : null;
-  if (!error || typeof error !== "object" || Array.isArray(error)) {
-    return { providerType: null, providerCode: null, providerParam: null, providerMessage: null };
-  }
+  if (!error || typeof error !== "object" || Array.isArray(error)) return empty;
   return {
-    providerType: allowlistedToken(error.type),
-    providerCode: allowlistedToken(error.code),
-    providerParam: allowlistedToken(error.param),
-    providerMessage: boundedProviderMessage(error.message),
+    providerType: DOCUMENTED_ERROR_TYPES.has(error.type) ? error.type : null,
+    providerCode: null,
+    providerParam: DOCUMENTED_CHAT_PARAMS.has(error.param) ? error.param : null,
+    providerMessage: null,
   };
-}
-
-function allowlistedToken(value) {
-  if (typeof value !== "string") return null;
-  if (!/^[A-Za-z0-9_.-]{1,64}$/.test(value)) return null;
-  return value;
-}
-
-function boundedProviderMessage(value) {
-  if (typeof value !== "string") return null;
-  let text = redactSecrets(value).replace(/\s+/g, " ").trim();
-  if (!text) return null;
-  if (text.length > 180) text = `${text.slice(0, 180)}…`;
-  if (/<evidence\b/i.test(text) || text.includes("SYNTHETIC sample") || text.includes("synthetic-stdout-token")) {
-    return null;
-  }
-  return text;
 }
 
 async function readErrorSummary(response) {
   const empty = { providerType: null, providerCode: null, providerParam: null, providerMessage: null };
-  if (!response || typeof response.json !== "function") return empty;
+  const parsed = await readJsonLimited(response, MAX_ERROR_BYTES);
+  if (!parsed.ok) return empty;
+  return summarizeProviderError(parsed.value);
+}
+
+async function readJsonLimited(response, maxBytes) {
+  if (!response) return { ok: false, value: null };
   try {
-    return summarizeProviderError(await response.json());
+    const streamed = await readStreamLimited(response.body, maxBytes);
+    if (streamed !== undefined) {
+      if (streamed === null) return { ok: false, value: null };
+      return { ok: true, value: JSON.parse(streamed) };
+    }
+    if (typeof response.text === "function") {
+      const text = await response.text();
+      if (typeof text !== "string" || Buffer.byteLength(text) > maxBytes) return { ok: false, value: null };
+      return { ok: true, value: JSON.parse(text) };
+    }
+    if (typeof response.json === "function") {
+      const value = await response.json();
+      if (Buffer.byteLength(JSON.stringify(value)) > maxBytes) return { ok: false, value: null };
+      return { ok: true, value };
+    }
   } catch {
-    return empty;
+    return { ok: false, value: null };
   }
+  return { ok: false, value: null };
+}
+
+async function readStreamLimited(body, maxBytes) {
+  if (!body || typeof body.getReader !== "function") return undefined;
+  const reader = body.getReader();
+  const parts = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
+    total += chunk.byteLength;
+    if (total > maxBytes) {
+      try { await reader.cancel(); } catch { /* already over the cap */ }
+      return null;
+    }
+    parts.push(chunk);
+  }
+  return new TextDecoder().decode(Buffer.concat(parts));
 }
 
 function publicEvidence(evidence) {
