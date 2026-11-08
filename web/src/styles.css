@@ -74,6 +74,8 @@ button, textarea, input { font: inherit; }
   gap: 18px;
 }
 
+.layout > * { min-width: 0; }
+
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -149,6 +151,7 @@ button.danger { background: var(--rust); color: var(--rust-ink); }
   font-size: 0.82rem;
   line-height: 1.45;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .prose { white-space: pre-wrap; line-height: 1.45; }
@@ -180,6 +183,28 @@ button.danger { background: var(--rust); color: var(--rust-ink); }
 .checks small { grid-column: 2; color: var(--muted); }
 .checks .pass strong { color: var(--good); }
 .checks .fail strong { color: var(--bad); }
+
+.checkline {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 12px;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.9rem;
+}
+
+.checkline input { margin-top: 3px; }
+
+.audit {
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.note {
+  color: var(--muted);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
 
 h2 { margin: 0 0 8px; }
 h3 { margin: 16px 0 6px; font-size: 0.95rem; }

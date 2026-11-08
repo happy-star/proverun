@@ -1,0 +1,11 @@
+{
+  "fixture": "local-fake-not-live",
+  "case": "error",
+  "httpStatus": 503,
+  "body": {
+    "error": {
+      "type": "server_error",
+      "message": "fixture upstream failure SERV_API_KEY=super-secret-value"
+    }
+  }
+}

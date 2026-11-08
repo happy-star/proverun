@@ -11,7 +11,8 @@
     "dev": "concurrently -n server,web -c blue,green \"npm run dev -w server\" \"npm run dev -w web\"",
     "start": "npm run start -w server",
     "build": "npm run build -w web",
-    "test": "npm test -w server"
+    "test": "npm test -w server",
+    "serv:smoke": "node scripts/serv-audit-smoke.mjs"
   },
   "engines": {
     "node": ">=20"

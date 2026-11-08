@@ -21,6 +21,11 @@ export function loadConfig(env = process.env) {
     cpus: env.SANDBOX_CPUS || "0.5",
     pidsLimit: String(positiveInt(env.SANDBOX_PIDS_LIMIT, 64)),
     maxCsvBytes,
+    servApiKey: (env.SERV_API_KEY || "").trim(),
+    servBaseUrl: (env.SERV_BASE_URL || "https://inference-api.openserv.ai/v1").replace(/\/$/, ""),
+    servModel: (env.SERV_MODEL || "gpt-5.4-mini").trim(),
+    servTimeoutMs: positiveInt(env.SERV_TIMEOUT_MS, 12_000),
+    servMaxCompletionTokens: positiveInt(env.SERV_MAX_COMPLETION_TOKENS, 500),
     repoRoot,
   };
 }

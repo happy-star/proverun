@@ -1,0 +1,21 @@
+{
+  "fixture": "local-fake-not-live",
+  "case": "exhausted",
+  "httpStatus": 200,
+  "body": {
+    "id": "fixture-exhausted-not-live",
+    "object": "chat.completion",
+    "model": "gpt-5.4-mini",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "{\"claims\":[{\"id\":\"c1\",\"statement\":\"This partial answer must be discarded.\",\"evidenceRefs\":[\"sandbox.exitCode\"]}],\"missingEvidence\":[],\"limitations\":[]}"
+        },
+        "finish_reason": "length"
+      }
+    ],
+    "usage": { "prompt_tokens": 10, "completion_tokens": 500, "total_tokens": 510 }
+  }
+}
