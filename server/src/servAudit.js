@@ -7,7 +7,9 @@ export const FIXED_LIMITATIONS = [
   "Claims are model inferences. They are not execution proof.",
   "The model cannot change sandbox network, mounts, capabilities, memory, or time limits.",
   "Ids starting with requested. are arguments ProveRun passed to docker, not a measurement that the kernel enforced them.",
-  "Question text, CSV contents, generated source, host paths, and secrets are not included.",
+  "Question text, CSV contents, generated source, host paths, and the canary value are not included.",
+  "Stdout and stderr are arbitrary sandbox output. Redaction is best-effort pattern matching and does not prove they are secret-free.",
+  "A supported claim only means its numbers and cited scalars agree with the cited text. It is still not execution proof.",
 ];
 
 export const AUDIT_RESPONSE_SCHEMA = {
@@ -91,7 +93,7 @@ export function createServAuditor(config, options = {}) {
           evidence,
           invocation,
           model,
-          liveCapable: !injected,
+          liveCapable: options.allowLiveResult === true || (!injected && invocation === "serv-http"),
         });
       } catch {
         return fail("provider_error", evidence, { invocation, model, liveCall: false });
@@ -118,6 +120,7 @@ export function buildChatRequest({ model, maxCompletionTokens, evidence }) {
         schema: AUDIT_RESPONSE_SCHEMA,
       },
     },
+    tool_choice: "none",
     tools: [
       { type: "function", function: { name: "serv_prompt_guard" } },
     ],
@@ -156,14 +159,27 @@ export function interpretBody(body, evidence, meta) {
   if (finishReason === "length") {
     return fail("exhausted", evidence, { ...meta, finishReason, liveCall: false });
   }
+  if (finishReason === "content_filter") {
+    return fail("content_filter", evidence, { ...meta, finishReason, liveCall: false });
+  }
+  if (finishReason === "tool_calls") {
+    return fail("tool_calls", evidence, { ...meta, finishReason, liveCall: false });
+  }
   if (finishReason !== "stop") {
     return fail("provider_error", evidence, { ...meta, finishReason });
   }
-  const content = choice?.message?.content;
+  const message = choice?.message || {};
+  if (typeof message.refusal === "string" && message.refusal.trim()) {
+    return fail("refusal", evidence, { ...meta, finishReason, liveCall: false });
+  }
+  if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+    return fail("tool_calls", evidence, { ...meta, finishReason, liveCall: false });
+  }
+  const content = message.content;
   if (typeof content !== "string" || !content.trim()) {
     return fail("malformed_json", evidence, { ...meta, finishReason });
   }
-  const parsed = parseModelAudit(content, new Set(evidence?.ids || []));
+  const parsed = parseModelAudit(content, evidence);
   if (!parsed.ok) {
     return fail(parsed.reason, evidence, {
       ...meta,
@@ -191,12 +207,20 @@ export function interpretBody(body, evidence, meta) {
   };
 }
 
-export function parseModelAudit(content, allowedIds) {
+export function parseModelAudit(content, evidenceOrIds) {
+  const evidence = evidenceOrIds instanceof Set
+    ? { ids: [...evidenceOrIds], items: [...evidenceOrIds].map((id) => ({ id, text: "" })) }
+    : evidenceOrIds;
+  const allowedIds = new Set(evidence?.ids || []);
+  const byId = new Map((evidence?.items || []).map((item) => [item.id, item]));
   let value;
   try {
     value = JSON.parse(content);
   } catch {
     return { ok: false, reason: "malformed_json" };
+  }
+  if (!value || Object.getPrototypeOf(value) !== Object.prototype) {
+    return { ok: false, reason: "schema_invalid" };
   }
   if (!isAuditShape(value)) return { ok: false, reason: "schema_invalid" };
   const unknown = [];
@@ -211,6 +235,14 @@ export function parseModelAudit(content, allowedIds) {
   if (unknown.length) {
     return { ok: false, reason: "ref_mismatch", unknownRefs: [...new Set(unknown)] };
   }
+  if ([...value.claims, ...value.limitations].some((item) => assertsExecutionProof(typeof item === "string" ? item : item.statement))) {
+    return { ok: false, reason: "ungrounded_claim" };
+  }
+  for (const claim of value.claims) {
+    if (!claim.evidenceRefs.length) continue;
+    const cited = claim.evidenceRefs.map((id) => byId.get(id)).filter(Boolean);
+    if (!claimIsGrounded(claim.statement, cited)) return { ok: false, reason: "ungrounded_claim" };
+  }
   return {
     ok: true,
     claims: value.claims.map((claim) => ({
@@ -218,11 +250,36 @@ export function parseModelAudit(content, allowedIds) {
       statement: claim.statement,
       evidenceRefs: claim.evidenceRefs,
       citation: claim.evidenceRefs.length ? "cited" : "uncited",
+      supported: claim.evidenceRefs.length > 0,
       authority: "model-inference",
     })),
     missingEvidence: value.missingEvidence,
     modelLimitations: value.limitations,
   };
+}
+
+function blobHasNumber(blob, number) {
+  const escaped = number.replace(".", "\\.");
+  return new RegExp(`(?<![\\d.])${escaped}(?![\\d.])`).test(blob);
+}
+
+export function assertsExecutionProof(text) {
+  return /\b(proven|proves|guaranteed|certified|kernel[- ]enforced)\b/i.test(text)
+    || /\b(this is|constitutes|serves as) (the )?(execution )?proof\b/i.test(text);
+}
+
+export function claimIsGrounded(statement, citedItems) {
+  if (!citedItems.length) return false;
+  const blob = citedItems.map((item) => item.text).join("\n");
+  const numbers = statement.match(/\d+(?:\.\d+)?/g) || [];
+  if (numbers.some((number) => !blobHasNumber(blob, number))) return false;
+  for (const item of citedItems) {
+    const scalar = item.text.trim();
+    if (scalar === "true" && /\bfalse\b/i.test(statement)) return false;
+    if (scalar === "false" && /\btrue\b/i.test(statement) && !/\bnot\s+true\b/i.test(statement)) return false;
+    if (scalar === "none" && /\b(bridge|host)\b/i.test(statement)) return false;
+  }
+  return true;
 }
 
 function isAuditShape(value) {

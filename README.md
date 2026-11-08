@@ -39,7 +39,7 @@ Details and the containment checks are in [ARCHITECTURE.md](ARCHITECTURE.md). On
 
 SERV is an optional audit of sanitized sandbox evidence. It is off unless a run sends `{ "audit": true }` and `SERV_API_KEY` is set. The default buttons do not send that flag. The public Vultr demo is unchanged.
 
-The audit runs only after the sandbox returns. It cannot start a container or change network, mounts, or limits. Runtime records (exit code, timeout, stdout, stderr, containment checks, and the arguments ProveRun passed to Docker) stay separate from model claims. Claims are inferences, not execution proof. A missing key, malformed JSON, a schema violation, an unknown evidence id, `finish_reason: "length"`, or a provider error ends as `unconfigured` or `inconclusive` with no accepted claims.
+The audit runs only after the sandbox returns. It cannot start a container or change network, mounts, or limits. Runtime records stay separate from model claims. A cited claim is kept only when its numbers and cited scalars occur in that cited text; that is still not execution proof. Stdout and stderr are arbitrary output: redaction is best-effort and does not prove they are secret-free. A missing key, malformed JSON, a schema violation, an unknown or ungrounded evidence id, a refusal, `tool_calls`, `content_filter`, `finish_reason: "length"`, or a provider error ends as `unconfigured` or `inconclusive` with no accepted claims.
 
 Setup, the request contract, and the fixture-only test record are in [docs/SERV-AUDIT.md](docs/SERV-AUDIT.md).
 

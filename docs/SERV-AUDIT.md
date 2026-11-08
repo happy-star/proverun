@@ -22,9 +22,10 @@ Documented in the SERV chat-completions reference and quickstart (fetched for th
 - `max_completion_tokens`: app cap, default 500.
 - `stream`: false.
 - `response_format.type`: `json_schema`, schema name `proverun_audit`. The SERV structured-output note says a schema is not a guarantee, so this app validates again.
-- `tools`: only `{ type: "function", function: { name: "serv_prompt_guard" } }`. That tool is the documented prompt-injection guard. It is not the shadow agent.
+- `tools`: only `{ type: "function", function: { name: "serv_prompt_guard" } }`, plus `tool_choice: "none"`. The guard is the documented prompt-injection tool and is not the shadow agent. `tool_choice: "none"` is a documented chat-completions value so the model is not asked to call a tool. This combination was not live-checked. If the gateway rejects it, the smoke command below exits non-zero.
+- `reasoning_effort: "low"` matches the reasoning-effort guide, which uses `gpt-5.4-mini` as the example and says to start at `low`.
 
-Documented response fields used here: `choices[0].message.content` and `choices[0].finish_reason` (`stop`, `length`, `content_filter`, `tool_calls`). `length` on HTTP 200 is treated as exhausted. Only `stop` plus schema-valid JSON can yield `status: "ok"`.
+Documented response fields used here: `choices[0].message.content` and `choices[0].finish_reason` (`stop`, `length`, `content_filter`, `tool_calls`). `length` on HTTP 200 is exhausted. `content_filter` and `tool_calls` are inconclusive. A non-empty `message.refusal` is inconclusive and its text is not copied. Only `stop`, no refusal, no tool call, and schema-valid JSON can yield `status: "ok"`.
 
 Model JSON:
 
@@ -36,7 +37,7 @@ Model JSON:
 }
 ```
 
-Every `evidenceRefs` entry must be an id in the bundle just sent. Unknown ids, extra keys, or bad types discard every claim.
+Every `evidenceRefs` entry must be an id in the bundle just sent. A cited claim is kept only when each number in the sentence occurs as its own number in the cited text, and when the sentence does not contradict a cited scalar (`true`, `false`, or `none`) or announce itself as proof. Unknown ids, extra keys, bad types, or an ungrounded sentence discard every claim. `supported: true` means that literal check passed. It does not mean the sentence is execution proof. Uncited claims stay `supported: false`.
 
 Job field `audit` is present only when the request set `audit` to boolean `true`. Otherwise the job JSON does not include `audit`.
 
@@ -56,8 +57,12 @@ Job field `audit` is present only when the request set `audit` to boolean `true`
 | Exhausted | `exhausted.json` | HTTP 200, `finish_reason: length`, claims dropped |
 | Provider error | `error.json` | HTTP 503, `provider_error`, upstream body not copied |
 | Injection | `injection.json` | hostile stdout redacted, unknown ref dropped, no shadow agent |
+| Ungrounded | inline | number `9` against stdout `8`, proof wording, or `bridge` against `none` drops every claim |
+| HTTP 200 non-stop | inline | fenced JSON, `refusal`, `tool_calls`, and `content_filter` are inconclusive |
+| Redaction | inline | labeled secrets and evidence-tag breakouts are removed; an ordinary sentence remains |
 | Unconfigured | no fixture call | `unconfigured`, zero fetches |
-| Regression | — | `audit: "true"` does not opt in; health keys unchanged; default run does not call the auditor |
+| Smoke harness | `scripts/serv-audit-smoke.mjs` | no key exits 2; a fixture success is not a live pass (exit 1) |
+| Regression | — | `audit: "true"` and `audit: 1` do not opt in; health keys unchanged; default run does not call the auditor |
 
 Not tested: a live SERV account, billing, `serv_prompt_guard` behavior on the real gateway, or an end-to-end sandbox on the public VM. Do not read a green fixture run as a live success.
 
@@ -75,10 +80,32 @@ The $1 grant was described as available. The additional $5 was not verified. Thi
 - No call unless `audit` is boolean `true` and the key is non-empty.
 - No call when the sandbox produced no run record.
 - One request. No retry loop and no `serv_shadow_agent` (the docs default that tool to 3 extra iterations).
-- `reasoning_effort` `low` and `max_completion_tokens` 500. At the published `gpt-5.4-mini` output price, 500 tokens is about $0.003 before input. Input is capped by redacted evidence fields of at most 1,200 characters each.
+- `reasoning_effort` `low` and `max_completion_tokens` 500 on the app path (about $0.003 of output at the published `gpt-5.4-mini` price, plus a small input). The standalone smoke command uses 200 output tokens (about $0.0012) and sends only the synthetic sample.
 - HTTP timeout default 12 seconds. The client cannot raise the token cap or pick a model.
 - Do not set `SERV_API_KEY` on the public Vultr VM until a live audit is an explicit decision. The submitted demo keeps working with the key unset.
 
+## Standalone live smoke
+
+Do not run this against the public demo, and do not restart or replace the process on port 8787. The command does not listen on a port, does not start Docker, and does not call Vultr. It sends one SERV chat completion about a fixed synthetic sample, or it sends nothing if the key is missing.
+
+```bash
+SERV_API_KEY='…' node scripts/serv-audit-smoke.mjs
+```
+
+The key is an environment variable, not an argument, and the script refuses to print a report that still contains it. It does not load `.env`. Output cap is 200 tokens. There is no retry and no shadow agent.
+
+The input is not a sandbox result. Its stdout is exactly:
+
+```text
+SYNTHETIC sample only. marker=synthetic-stdout-token-7. Not a containment run.
+```
+
+Exit code `0` is the only pass. The printed JSON then has `synthetic: true`, `containmentProof: false`, `calls: 1`, `audit.status` `ok`, `audit.liveCall` `true`, `audit.invocation` `serv-http`, `audit.finishReason` `stop`, and every claim `supported: true`. The runtime evidence text includes `SYNTHETIC` and `synthetic-stdout-token-7`.
+
+Any other SERV outcome exits `1` and is not a pass: inconclusive grounding, refusal, `tool_calls`, `content_filter`, `finish_reason: "length"`, or a provider error. `claims` is empty in those cases and `liveCall` is false. A missing key exits `2` with `calls: 0`.
+
+If a UI check is wanted later, start this branch on a different port, for example `PORT=8791 npm start`, and leave port 8787 alone.
+
 ## Limitations
 
-SERV does not witness the sandbox. It sees the text ProveRun chooses to send. `requested.*` ids are spawn arguments, not proof the kernel enforced them. A cited claim can still be a wrong reading of that text. Prompt injection inside stdout is untrusted data; a model that follows it is discarded only when the reply fails validation. A reply that cites a real id and still says something false remains an inference on screen, and ProveRun does not act on it.
+SERV does not witness the sandbox. It sees text ProveRun chooses to send. `requested.*` ids are spawn arguments, not proof the kernel enforced them. Redaction does not make stdout or stderr secret-free. A cited claim can still misread wording that contains no checked number or scalar. Prompt injection inside stdout is untrusted data. ProveRun does not act on model text.

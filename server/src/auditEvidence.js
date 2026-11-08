@@ -2,22 +2,33 @@ const MAX_FIELD = 1_200;
 const RUN_NAMES = new Set(["sandbox", "probe", "destroy"]);
 
 const SECRET_PATTERNS = [
-  /\b(?:SERV_API_KEY|VULTR_INFERENCE_API_KEY|OPENAI_API_KEY|AWS_SECRET_ACCESS_KEY|AUTHORIZATION)\b\s*[:=]\s*\S+/gi,
-  /Bearer\s+[A-Za-z0-9._~+/-]+=*/gi,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g,
+  /\b(?:ghp|gho|github_pat)_[A-Za-z0-9_]{10,}\b/g,
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g,
   /\bsk-[A-Za-z0-9_-]{8,}\b/g,
   /\bAKIA[0-9A-Z]{16}\b/g,
+  /Bearer\s+[A-Za-z0-9._~+/-]+=*/gi,
+  /\b(?:SERV_API_KEY|VULTR_INFERENCE_API_KEY|OPENAI_API_KEY|AWS_SECRET_ACCESS_KEY|api[_-]?key|secret|token|password|passwd|credential|authorization)\b\s*[:=]\s*(?:"[^"\n]{0,200}"|'[^'\n]{0,200}'|\S+)/gi,
+  /([?&](?:key|token|secret|password|access_token)=)[^&\s]+/gi,
 ];
 
 export function redactSecrets(text) {
-  let out = String(text ?? "");
+  let out = String(text ?? "").replace(/\u0000/g, "");
   for (const pattern of SECRET_PATTERNS) {
-    out = out.replace(pattern, "[redacted]");
+    out = out.replace(new RegExp(pattern.source, pattern.flags), "[redacted]");
   }
-  return out.replace(/\u0000/g, "");
+  return out;
+}
+
+export function neutralizeEvidenceTags(text) {
+  return String(text ?? "")
+    .replace(/<\/?\s*evidence\b[^>\n]*>/gi, "[redacted-tag]")
+    .replace(/<\s*\/\s*evidence\b/gi, "[redacted-tag]");
 }
 
 export function boundText(text, max = MAX_FIELD) {
-  const clean = redactSecrets(text).replaceAll("</evidence>", "< /evidence>");
+  const clean = neutralizeEvidenceTags(redactSecrets(text));
   if (clean.length <= max) return clean;
   return `${clean.slice(0, max)}\n[truncated]`;
 }
@@ -61,8 +72,8 @@ export function buildRuntimeEvidence(input) {
       "csv contents",
       "generated source",
       "host paths",
-      "canary secret",
-      "API keys",
+      "canary value",
     ],
+    redaction: "best-effort patterns only; stdout and stderr are arbitrary output and are not proven secret-free",
   };
 }

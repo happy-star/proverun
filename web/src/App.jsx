@@ -200,6 +200,7 @@ function AuditView({ audit }) {
       <h3>SERV audit</h3>
       <p className="note">
         Status {audit.status}{audit.reason ? ` (${audit.reason})` : ""}. Model statements are inferences, not execution proof.
+        Stdout and stderr are arbitrary output; redaction is best-effort and not a guarantee they are secret-free.
         {audit.liveCall ? " This process called the configured SERV endpoint." : " This result is not a live SERV call."}
       </p>
       <ul className="checks">
@@ -214,7 +215,7 @@ function AuditView({ audit }) {
       <h3>Model inferences</h3>
       {audit.claims?.length ? audit.claims.map((claim) => (
         <p key={claim.id} className="prose">
-          {claim.statement} ({claim.citation}; refs {claim.evidenceRefs.join(", ") || "none"})
+          {claim.statement} ({claim.supported ? "literals match cited evidence; still not proof" : "not supported"}; {claim.citation}; refs {claim.evidenceRefs.join(", ") || "none"})
         </p>
       )) : <p className="note">No model claim was accepted.</p>}
       {audit.missingEvidence?.length ? (
