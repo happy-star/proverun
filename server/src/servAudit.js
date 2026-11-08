@@ -19,31 +19,27 @@ export const AUDIT_RESPONSE_SCHEMA = {
   properties: {
     claims: {
       type: "array",
-      maxItems: 8,
       items: {
         type: "object",
         additionalProperties: false,
         required: ["id", "statement", "evidenceRefs"],
         properties: {
-          id: { type: "string", minLength: 1, maxLength: 40 },
-          statement: { type: "string", minLength: 1, maxLength: 500 },
+          id: { type: "string" },
+          statement: { type: "string" },
           evidenceRefs: {
             type: "array",
-            maxItems: 6,
-            items: { type: "string", minLength: 1, maxLength: 80 },
+            items: { type: "string" },
           },
         },
       },
     },
     missingEvidence: {
       type: "array",
-      maxItems: 8,
-      items: { type: "string", minLength: 1, maxLength: 300 },
+      items: { type: "string" },
     },
     limitations: {
       type: "array",
-      maxItems: 8,
-      items: { type: "string", minLength: 1, maxLength: 300 },
+      items: { type: "string" },
     },
   },
 };
@@ -96,7 +92,13 @@ export function createServAuditor(config, options = {}) {
           liveCapable: options.allowLiveResult === true || (!injected && invocation === "serv-http"),
         });
       } catch {
-        return fail("provider_error", evidence, { invocation, model, liveCall: false });
+        return fail("provider_error", evidence, {
+          invocation,
+          model,
+          liveCall: false,
+          requestAttempted: true,
+          requestSent: false,
+        });
       }
     },
   };
@@ -120,7 +122,6 @@ export function buildChatRequest({ model, maxCompletionTokens, evidence }) {
         schema: AUDIT_RESPONSE_SCHEMA,
       },
     },
-    tool_choice: "none",
     tools: [
       { type: "function", function: { name: "serv_prompt_guard" } },
     ],
@@ -141,15 +142,25 @@ export function buildEvidenceMessage(evidence) {
   return lines.join("\n");
 }
 
-export function interpretResponse({ response, evidence, invocation, model, liveCapable }) {
-  const base = { invocation, model, liveCall: false };
+export async function interpretResponse({ response, evidence, invocation, model, liveCapable }) {
+  const transport = {
+    invocation,
+    model,
+    liveCall: false,
+    requestAttempted: true,
+    requestSent: Boolean(response && typeof response.status === "number"),
+  };
   if (!response || response.ok !== true) {
-    return fail("provider_error", evidence, { ...base, providerStatus: response?.status ?? null });
+    const summary = await readErrorSummary(response);
+    return fail("provider_error", evidence, {
+      ...transport,
+      providerStatus: response?.status ?? null,
+      ...summary,
+    });
   }
-  return response.json().then(
-    (body) => interpretBody(body, evidence, { ...base, liveCapable }),
-    () => fail("provider_error", evidence, base),
-  );
+  const parsed = await readJsonLimited(response, MAX_SUCCESS_BYTES);
+  if (!parsed.ok) return fail("provider_error", evidence, transport);
+  return interpretBody(parsed.value, evidence, { ...transport, liveCapable });
 }
 
 export function interpretBody(body, evidence, meta) {
@@ -193,6 +204,8 @@ export function interpretBody(body, evidence, meta) {
     reason: null,
     authority: "model-inference",
     invocation: meta.invocation,
+    requestAttempted: meta.requestAttempted === true,
+    requestSent: meta.requestSent === true,
     liveCall: Boolean(meta.liveCapable),
     model: meta.model,
     finishReason,
@@ -204,6 +217,10 @@ export function interpretBody(body, evidence, meta) {
     omitted: evidence?.omitted || [],
     unknownRefs: [],
     providerStatus: null,
+    providerType: null,
+    providerCode: null,
+    providerParam: null,
+    providerMessage: null,
   };
 }
 
@@ -312,6 +329,8 @@ export function unconfiguredAudit(evidence) {
     reason: "unconfigured",
     authority: "none",
     invocation: "none",
+    requestAttempted: false,
+    requestSent: false,
     liveCall: false,
     model: null,
     finishReason: null,
@@ -326,6 +345,10 @@ export function unconfiguredAudit(evidence) {
     omitted: evidence?.omitted || [],
     unknownRefs: [],
     providerStatus: null,
+    providerType: null,
+    providerCode: null,
+    providerParam: null,
+    providerMessage: null,
   };
 }
 
@@ -347,6 +370,8 @@ function fail(reason, evidence, extra = {}) {
     reason,
     authority: "none",
     invocation: extra.invocation || "none",
+    requestAttempted: extra.requestAttempted === true,
+    requestSent: extra.requestSent === true,
     liveCall: false,
     model: extra.model ?? null,
     finishReason: extra.finishReason ?? null,
@@ -358,7 +383,88 @@ function fail(reason, evidence, extra = {}) {
     omitted: evidence?.omitted || [],
     unknownRefs: extra.unknownRefs || [],
     providerStatus: extra.providerStatus ?? null,
+    providerType: extra.providerType ?? null,
+    providerCode: extra.providerCode ?? null,
+    providerParam: extra.providerParam ?? null,
+    providerMessage: extra.providerMessage ?? null,
   };
+}
+
+const DOCUMENTED_ERROR_TYPES = new Set(["invalid_request_error"]);
+const DOCUMENTED_CHAT_PARAMS = new Set([
+  "model",
+  "messages",
+  "max_completion_tokens",
+  "reasoning_effort",
+  "temperature",
+  "tools",
+  "tool_choice",
+  "stream",
+  "response_format",
+]);
+const MAX_ERROR_BYTES = 4_096;
+const MAX_SUCCESS_BYTES = 65_536;
+
+export function summarizeProviderError(body) {
+  const empty = { providerType: null, providerCode: null, providerParam: null, providerMessage: null };
+  const error = body && typeof body === "object" ? body.error : null;
+  if (!error || typeof error !== "object" || Array.isArray(error)) return empty;
+  return {
+    providerType: DOCUMENTED_ERROR_TYPES.has(error.type) ? error.type : null,
+    providerCode: null,
+    providerParam: DOCUMENTED_CHAT_PARAMS.has(error.param) ? error.param : null,
+    providerMessage: null,
+  };
+}
+
+async function readErrorSummary(response) {
+  const empty = { providerType: null, providerCode: null, providerParam: null, providerMessage: null };
+  const parsed = await readJsonLimited(response, MAX_ERROR_BYTES);
+  if (!parsed.ok) return empty;
+  return summarizeProviderError(parsed.value);
+}
+
+async function readJsonLimited(response, maxBytes) {
+  if (!response) return { ok: false, value: null };
+  try {
+    const streamed = await readStreamLimited(response.body, maxBytes);
+    if (streamed !== undefined) {
+      if (streamed === null) return { ok: false, value: null };
+      return { ok: true, value: JSON.parse(streamed) };
+    }
+    if (typeof response.text === "function") {
+      const text = await response.text();
+      if (typeof text !== "string" || Buffer.byteLength(text) > maxBytes) return { ok: false, value: null };
+      return { ok: true, value: JSON.parse(text) };
+    }
+    if (typeof response.json === "function") {
+      const value = await response.json();
+      if (Buffer.byteLength(JSON.stringify(value)) > maxBytes) return { ok: false, value: null };
+      return { ok: true, value };
+    }
+  } catch {
+    return { ok: false, value: null };
+  }
+  return { ok: false, value: null };
+}
+
+async function readStreamLimited(body, maxBytes) {
+  if (!body || typeof body.getReader !== "function") return undefined;
+  const reader = body.getReader();
+  const parts = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = value instanceof Uint8Array ? value : new Uint8Array(value);
+    total += chunk.byteLength;
+    if (total > maxBytes) {
+      try { await reader.cancel(); } catch { /* already over the cap */ }
+      return null;
+    }
+    parts.push(chunk);
+  }
+  return new TextDecoder().decode(Buffer.concat(parts));
 }
 
 function publicEvidence(evidence) {

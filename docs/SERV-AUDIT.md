@@ -22,8 +22,9 @@ Documented in the SERV chat-completions reference and quickstart (fetched for th
 - `max_completion_tokens`: app cap, default 500.
 - `stream`: false.
 - `response_format.type`: `json_schema`, schema name `proverun_audit`. The SERV structured-output note says a schema is not a guarantee, so this app validates again.
-- `tools`: only `{ type: "function", function: { name: "serv_prompt_guard" } }`, plus `tool_choice: "none"`. The guard is the documented prompt-injection tool and is not the shadow agent. `tool_choice: "none"` is a documented chat-completions value so the model is not asked to call a tool. This combination was not live-checked. If the gateway rejects it, the smoke command below exits non-zero.
-- `reasoning_effort: "low"` matches the reasoning-effort guide, which uses `gpt-5.4-mini` as the example and says to start at `low`.
+- `tools`: only `{ type: "function", function: { name: "serv_prompt_guard" } }`, matching the published prompt-guard example. `serv_shadow_agent` is not sent. `tool_choice` is omitted. The chat-completions page lists `"none"` as a legal value, and the SDK parameter map does not. No published example sets `tool_choice` when the only tool is `serv_prompt_guard`, and SERV strips `serv_*` tools before the model.
+- The JSON schema sent to SERV uses the same keyword set as the structured-output example: `type`, `properties`, `required`, `additionalProperties`, and string or array types. `minLength`, `maxLength`, and `maxItems` are enforced only in this process after the response arrives.
+- `reasoning_effort: "low"` matches the reasoning-effort guide, which uses `gpt-5.4-mini` as the example and says to start at `low`. `max_completion_tokens` is the documented chat token-cap field.
 
 Documented response fields used here: `choices[0].message.content` and `choices[0].finish_reason` (`stop`, `length`, `content_filter`, `tool_calls`). `length` on HTTP 200 is exhausted. `content_filter` and `tool_calls` are inconclusive. A non-empty `message.refusal` is inconclusive and its text is not copied. Only `stop`, no refusal, no tool call, and schema-valid JSON can yield `status: "ok"`.
 
@@ -56,6 +57,7 @@ Job field `audit` is present only when the request set `audit` to boolean `true`
 | Schema | `schema-invalid.json` | `inconclusive` / `schema_invalid` |
 | Exhausted | `exhausted.json` | HTTP 200, `finish_reason: length`, claims dropped |
 | Provider error | `error.json` | HTTP 503, `provider_error`, upstream body not copied |
+| HTTP 400 | `http-400.json` | `requestSent` true, `liveCall` false, allowlisted type/code/param kept, poisoned message dropped |
 | Injection | `injection.json` | hostile stdout redacted, unknown ref dropped, no shadow agent |
 | Ungrounded | inline | number `9` against stdout `8`, proof wording, or `bridge` against `none` drops every claim |
 | HTTP 200 non-stop | inline | fenced JSON, `refusal`, `tool_calls`, and `content_filter` are inconclusive |
@@ -84,6 +86,14 @@ The $1 grant was described as available. The additional $5 was not verified. Thi
 - HTTP timeout default 12 seconds. The client cannot raise the token cap or pick a model.
 - Do not set `SERV_API_KEY` on the public Vultr VM until a live audit is an explicit decision. The submitted demo keeps working with the key unset.
 
+## Observed controlled smoke
+
+One authorized run of the packed `69e6463` runtime returned HTTP 400 after 9.280 seconds. The process exited 1. The report had `calls` 1, `status` `inconclusive`, `reason` `provider_error`, `liveCall` false, `finishReason` null, and `claims` empty. `providerStatus` was 400. The raw provider body was not saved, so this repo does not record `error.type`, `error.code`, `error.param`, or `error.message` for that run. That is not a diagnosis. `liveCall` false meant the response was not a validated success. It did not mean no request was sent: `calls` was 1.
+
+The request on that build also sent `tool_choice: "none"` and a schema containing `minLength`, `maxLength`, and `maxItems`. Those differ from the published prompt-guard and structured-output examples. Whether they caused the 400 is not established. This change stops sending them and records an allowlisted error summary on the next run. It does not claim the 400 is fixed.
+
+`requestAttempted` means this process called `fetch`. `requestSent` means an HTTP status came back. `liveCall` stays true only after a live-capable response passes validation.
+
 ## Standalone live smoke
 
 Do not run this against the public demo, and do not restart or replace the process on port 8787. The command does not listen on a port, does not start Docker, and does not call Vultr. It sends one SERV chat completion about a fixed synthetic sample, or it sends nothing if the key is missing.
@@ -100,7 +110,9 @@ The input is not a sandbox result. Its stdout is exactly:
 SYNTHETIC sample only. marker=synthetic-stdout-token-7. Not a containment run.
 ```
 
-Exit code `0` is the only pass. The printed JSON then has `synthetic: true`, `containmentProof: false`, `calls: 1`, `audit.status` `ok`, `audit.liveCall` `true`, `audit.invocation` `serv-http`, `audit.finishReason` `stop`, and every claim `supported: true`. The runtime evidence text includes `SYNTHETIC` and `synthetic-stdout-token-7`.
+Exit code `0` is the only pass. The printed JSON then has `synthetic: true`, `containmentProof: false`, `calls: 1`, `requestSent` true, `audit.status` `ok`, `audit.liveCall` `true`, `audit.invocation` `serv-http`, `audit.finishReason` `stop`, and every claim `supported: true`. The runtime evidence text includes `SYNTHETIC` and `synthetic-stdout-token-7`.
+
+A non-zero exit can still mean one request was sent. Read `calls`, `requestAttempted`, and `requestSent`. `liveCall` is not that signal. On a provider error the report keeps the HTTP status. `providerType` is copied only when it is exactly `invalid_request_error`. `providerParam` is copied only when it is one of the chat-completions parameter names in the SERV docs. `providerCode` and `providerMessage` are always omitted: those fields are free text, and redaction would not make an unlabeled key or evidence quote safe to print. The raw body is not stored. The next useful live check is this same command once. That still does not prove an earlier 400 is fixed until that run is reviewed.
 
 Any other SERV outcome exits `1` and is not a pass: inconclusive grounding, refusal, `tool_calls`, `content_filter`, `finish_reason: "length"`, or a provider error. `claims` is empty in those cases and `liveCall` is false. A missing key exits `2` with `calls: 0`.
 

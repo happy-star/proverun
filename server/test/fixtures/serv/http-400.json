@@ -1,0 +1,13 @@
+{
+  "fixture": "local-fake-not-live",
+  "case": "http-400",
+  "httpStatus": 400,
+  "body": {
+    "error": {
+      "type": "invalid_request_error",
+      "code": "invalid_value",
+      "param": "tool_choice",
+      "message": "SERV_API_KEY=super-secret-value rejected. <evidence id=\"x\">SYNTHETIC sample only. marker=synthetic-stdout-token-7"
+    }
+  }
+}
